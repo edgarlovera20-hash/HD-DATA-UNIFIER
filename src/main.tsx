@@ -158,7 +158,7 @@ function App() {
         <nav className="nav-list" aria-label="Data Unifier">
           <button className="nav-item active" type="button">
             <UploadCloud size={17} />
-            Nueva unificacion
+            Nueva unificación
           </button>
           <button className="nav-item" type="button">
             <History size={17} />
@@ -208,7 +208,7 @@ function App() {
             </label>
             <div className="upload-actions">
               <select value={baseFileId} onChange={(event) => setBaseFileId(event.target.value)}>
-                <option value="">Base automatica</option>
+                <option value="">Base automática</option>
                 {files.map((file) => (
                   <option key={file.id} value={file.id}>
                     {file.originalName}
@@ -270,7 +270,7 @@ function App() {
                 </div>
               </div>
             ) : (
-              <EmptyState label="Sin unificacion ejecutada" />
+              <EmptyState label="Sin unificación ejecutada" />
             )}
           </div>
 
