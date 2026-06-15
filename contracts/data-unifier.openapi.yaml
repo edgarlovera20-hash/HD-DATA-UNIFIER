@@ -1,0 +1,70 @@
+openapi: 3.1.0
+info:
+  title: HD-DATA-UNIFIER API
+  version: 0.1.0
+paths:
+  /api/data-unifier/upload:
+    post:
+      summary: Upload XLSX or CSV files
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                files:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+      responses:
+        "200":
+          description: Uploaded files with preview
+  /api/data-unifier/preview:
+    post:
+      summary: Preview detected columns
+      responses:
+        "200":
+          description: Preview
+  /api/data-unifier/merge:
+    post:
+      summary: Merge files by FOLIO_SIAC
+      responses:
+        "200":
+          description: Merge result
+  /api/data-unifier/history:
+    get:
+      summary: Recent uploads and jobs
+      responses:
+        "200":
+          description: History
+  /api/data-unifier/download/{id}:
+    get:
+      summary: Download generated xlsx or csv
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: format
+          in: query
+          schema:
+            type: string
+            enum: [xlsx, csv]
+      responses:
+        "200":
+          description: Generated file
+  /api/data-unifier/report/{id}:
+    get:
+      summary: Read merge report
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Report

@@ -1,0 +1,100 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model UploadedFile {
+  id           String   @id @default(cuid())
+  originalName String
+  storedName   String
+  mimeType     String
+  extension    String
+  size         Int
+  path         String
+  uploadedAt   DateTime @default(now())
+  columns      FileColumn[]
+  jobFiles     MergeJobFile[]
+
+  @@map("uploaded_files")
+}
+
+model FileColumn {
+  id           String       @id @default(cuid())
+  uploadedFile UploadedFile @relation(fields: [fileId], references: [id])
+  fileId       String
+  originalName String
+  canonical    String
+  confidence   String
+
+  @@map("file_columns")
+}
+
+model MergeJob {
+  id          String          @id @default(cuid())
+  status      String
+  baseFileId  String
+  createdAt   DateTime        @default(now())
+  completedAt DateTime?
+  files       MergeJobFile[]
+  results     MergeResult[]
+  conflicts   MergeConflict[]
+  logs        MergeLog[]
+
+  @@map("merge_jobs")
+}
+
+model MergeJobFile {
+  id             String       @id @default(cuid())
+  mergeJob       MergeJob     @relation(fields: [mergeJobId], references: [id])
+  mergeJobId     String
+  uploadedFile   UploadedFile @relation(fields: [uploadedFileId], references: [id])
+  uploadedFileId String
+  role           String
+
+  @@map("merge_job_files")
+}
+
+model MergeResult {
+  id         String   @id @default(cuid())
+  mergeJob   MergeJob @relation(fields: [mergeJobId], references: [id])
+  mergeJobId String
+  format     String
+  path       String
+  summary    Json
+
+  @@map("merge_results")
+}
+
+model MergeConflict {
+  id             String   @id @default(cuid())
+  mergeJob       MergeJob @relation(fields: [mergeJobId], references: [id])
+  mergeJobId     String
+  folioSiac      String
+  field          String
+  existingValue  String
+  incomingValue  String
+  existingSource String
+  incomingSource String
+  createdAt      DateTime @default(now())
+
+  @@map("merge_conflicts")
+}
+
+model MergeLog {
+  id             String   @id @default(cuid())
+  mergeJob       MergeJob @relation(fields: [mergeJobId], references: [id])
+  mergeJobId     String
+  folioSiac      String
+  field          String
+  previousValue  String?
+  newValue       String?
+  sourceFileName String
+  createdAt      DateTime @default(now())
+
+  @@map("merge_logs")
+}
+
