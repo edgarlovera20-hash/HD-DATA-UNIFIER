@@ -9,7 +9,9 @@ $dotenv->load();
 $mysqli = new mysqli($_ENV['DB_HOST'], $_ENV['DB_USER'], $_ENV['DB_PASS'], $_ENV['DB_NAME']);
 $mysqli->set_charset('utf8mb4');
 
-// Verificación
+// -------------------------------------------------------
+// GET: verificación de webhook Meta
+// -------------------------------------------------------
 if (isset($_GET['hub_mode']) && $_GET['hub_mode'] === 'subscribe') {
     echo ($_GET['hub_verify_token'] === $_ENV['META_VERIFY_TOKEN'])
         ? $_GET['hub_challenge']
@@ -17,18 +19,37 @@ if (isset($_GET['hub_mode']) && $_GET['hub_mode'] === 'subscribe') {
     exit;
 }
 
-$input = json_decode(file_get_contents('php://input'), true);
+// -------------------------------------------------------
+// POST: verificar firma X-Hub-Signature-256
+// -------------------------------------------------------
+$rawBody   = file_get_contents('php://input');
+$sigHeader = $_SERVER['HTTP_X_HUB_SIGNATURE_256'] ?? '';
+$expected  = 'sha256=' . hash_hmac('sha256', $rawBody, $_ENV['META_APP_SECRET']);
+
+if (!$sigHeader || !hash_equals($expected, $sigHeader)) {
+    http_response_code(403);
+    exit;
+}
+
+$input = json_decode($rawBody, true);
 
 foreach ($input['entry'] ?? [] as $entry) {
     foreach ($entry['messaging'] ?? [] as $event) {
         if (!isset($event['message']['text'])) continue;
 
-        $psid   = $event['sender']['id'];
-        $texto  = $event['message']['text'];
-        $canal  = $input['object'] === 'instagram' ? 'instagram' : 'messenger';
+        $psid  = $event['sender']['id'];
+        $texto = $event['message']['text'];
+        $canal = $input['object'] === 'instagram' ? 'instagram' : 'messenger';
 
-        $empresa_id = 1;
-        $seccion_id = 1;
+        // Resolver empresa/sección por page_id
+        $page_id  = $entry['id'] ?? '';
+        $page_esc = $mysqli->real_escape_string($page_id);
+        $canal_row = $mysqli->query(
+            "SELECT * FROM canales WHERE page_id='$page_esc' AND canal='$canal' AND activo=1 LIMIT 1"
+        )->fetch_assoc();
+
+        $empresa_id = (int) ($canal_row['empresa_id'] ?? 1);
+        $seccion_id = (int) ($canal_row['seccion_id'] ?? 1);
 
         $psid_esc = $mysqli->real_escape_string($psid);
         $mysqli->query(
@@ -37,7 +58,7 @@ foreach ($input['entry'] ?? [] as $entry) {
              ON DUPLICATE KEY UPDATE mensajes_recibidos=mensajes_recibidos+1,ultima_interaccion=NOW()"
         );
         $lead_id = $mysqli->insert_id
-            ?: (int) $mysqli->query("SELECT id FROM leads WHERE canal_user_id='$psid_esc' AND canal='$canal'")->fetch_assoc()['id'];
+            ?: (int) $mysqli->query("SELECT id FROM leads WHERE empresa_id=$empresa_id AND canal='$canal' AND canal_user_id='$psid_esc'")->fetch_assoc()['id'];
 
         $scorer = new LeadScorerIA($empresa_id, $seccion_id, $mysqli);
         $scorer->calcularScore($lead_id);
@@ -50,11 +71,7 @@ foreach ($input['entry'] ?? [] as $entry) {
              ON DUPLICATE KEY UPDATE mensajes_recibidos=mensajes_recibidos+1"
         );
 
-        $canal_cfg = $mysqli->query(
-            "SELECT * FROM canales WHERE empresa_id=$empresa_id AND seccion_id=$seccion_id AND canal='$canal'"
-        )->fetch_assoc();
-
-        $manager   = new CanalManager($empresa_id, $seccion_id, $mysqli, $canal_cfg);
+        $manager   = new CanalManager($empresa_id, $seccion_id, $mysqli, $canal_row);
         $respuesta = "Hola, soy Lic. Gissell de RH. ¿Qué edad tienes y en qué ciudad estás?";
         $manager->procesarMensaje($psid, $texto);
         $manager->enviarRespuesta($psid, $respuesta);
