@@ -5,11 +5,7 @@ const http = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
-export const fetchKPIs = (params) =>
-  http.get('/kpis', { params }).then((r) => r.data);
-
-export const fetchCola = (params) =>
-  http.get('/kpis/cola', { params }).then((r) => r.data);
-
-export const fetchKPIHoras = (params) =>
-  http.get('/kpis/horas', { params }).then((r) => r.data);
+export const fetchKPIs     = (params) => http.get('/kpis',         { params }).then((r) => r.data);
+export const fetchCola     = (params) => http.get('/kpis/cola',    { params }).then((r) => r.data);
+export const fetchKPIHoras = (params) => http.get('/kpis/horas',   { params }).then((r) => r.data);
+export const fetchAbTests  = (params) => http.get('/kpis/ab',      { params }).then((r) => r.data);

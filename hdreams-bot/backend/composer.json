@@ -1,6 +1,6 @@
 {
   "name": "hdreams/bot",
-  "description": "HDreams WhatsApp recruitment bot backend",
+  "description": "HDreams multi-canal recruitment bot",
   "type": "project",
   "require": {
     "php": "^8.2",
@@ -11,7 +11,11 @@
   "autoload": {
     "psr-4": {
       "App\\": "app/"
-    }
+    },
+    "files": [
+      "app/Services/LeadScorerIA.php",
+      "app/Services/CanalManager.php"
+    ]
   },
   "config": {
     "optimize-autoloader": true,

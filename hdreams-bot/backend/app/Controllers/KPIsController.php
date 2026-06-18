@@ -11,169 +11,218 @@ class KPIsController
         $this->db = $db;
     }
 
-    // GET /api/kpis?empresa_id=1&desde=2026-06-01&hasta=2026-06-18
+    // GET /api/kpis?empresa_id=1&desde=2026-06-01&hasta=2026-06-18&canal=whatsapp
     public function resumen(): void
     {
         $empresa_id = (int) ($_GET['empresa_id'] ?? 0);
-        $desde      = $this->sanitizeDate($_GET['desde'] ?? date('Y-m-01'));
-        $hasta      = $this->sanitizeDate($_GET['hasta'] ?? date('Y-m-d'));
+        $desde      = $this->safeDate($_GET['desde'] ?? date('Y-m-01'));
+        $hasta      = $this->safeDate($_GET['hasta'] ?? date('Y-m-d'));
+        $canal      = $this->safeEnum($_GET['canal'] ?? null, ['whatsapp','messenger','instagram','facebook','gmail','outlook','teams','telegram']);
 
-        if (!$empresa_id) {
-            $this->json(['error' => 'empresa_id requerido'], 400);
-            return;
-        }
-
-        $totales   = $this->totalesLeads($empresa_id, $desde, $hasta);
-        $horario   = $this->leadsPorHora($empresa_id, $desde, $hasta);
-        $prioridad = $this->distribucionPrioridad($empresa_id, $desde, $hasta);
-        $canales   = $this->leadsPorCanal($empresa_id, $desde, $hasta);
+        if (!$empresa_id) { $this->json(['error' => 'empresa_id requerido'], 400); return; }
 
         $this->json([
-            'periodo' => ['desde' => $desde, 'hasta' => $hasta],
-            'totales' => $totales,
-            'por_hora' => $horario,
-            'por_prioridad' => $prioridad,
-            'por_canal' => $canales,
+            'periodo'       => ['desde' => $desde, 'hasta' => $hasta, 'canal' => $canal],
+            'totales'       => $this->totalesLeads($empresa_id, $desde, $hasta, $canal),
+            'por_hora'      => $this->leadsPorHora($empresa_id, $desde, $hasta, $canal),
+            'por_prioridad' => $this->distribucionPrioridad($empresa_id, $desde, $hasta),
+            'por_canal'     => $this->leadsPorCanal($empresa_id, $desde, $hasta),
+            'ab_tests'      => $this->resumenAbTests($empresa_id),
         ]);
     }
 
-    // GET /api/kpis/cola?empresa_id=1&prioridad=urgente
+    // GET /api/kpis/cola?empresa_id=1&prioridad=urgente&limite=20
     public function colaLeads(): void
     {
         $empresa_id = (int) ($_GET['empresa_id'] ?? 0);
-        $prioridad  = $_GET['prioridad'] ?? null;
+        $prioridad  = $this->safeEnum($_GET['prioridad'] ?? null, ['urgente','alta','media','baja']);
         $limite     = min((int) ($_GET['limite'] ?? 20), 100);
 
-        if (!$empresa_id) {
-            $this->json(['error' => 'empresa_id requerido'], 400);
-            return;
-        }
+        if (!$empresa_id) { $this->json(['error' => 'empresa_id requerido'], 400); return; }
 
-        $where = "l.empresa_id = $empresa_id AND l.estado NOT IN ('descartado','contratado')";
-        if ($prioridad && in_array($prioridad, ['urgente','alta','media','baja'], true)) {
-            $where .= " AND l.prioridad = '$prioridad'";
-        }
+        $where = "l.empresa_id = $empresa_id AND l.estado NOT IN ('rechazado','no_interesado','contratado')";
+        if ($prioridad) $where .= " AND l.prioridad = '$prioridad'";
 
-        $sql = "SELECT l.id, l.nombre, l.telefono, l.ciudad, l.prioridad, l.estado,
-                       l.score_ia_candidato, l.score_ia_contratacion, l.creado_en,
-                       s.nombre AS seccion
+        $sql = "SELECT l.id, l.nombre, l.telefono, l.canal, l.canal_user_id,
+                       l.prioridad, l.estado, l.score_ia_candidato, l.score_ia_contratacion,
+                       l.mensajes_recibidos, l.primera_interaccion, l.ultima_interaccion,
+                       s.nombre AS seccion,
+                       lsi.razonamiento,
+                       lcp.vence_en, lcp.sla_horas
                 FROM leads l
                 JOIN secciones s ON l.seccion_id = s.id
+                LEFT JOIN lead_scoring_ia lsi ON lsi.lead_id = l.id
+                LEFT JOIN lead_cola_prioridad lcp ON lcp.lead_id = l.id
                 WHERE $where
                 ORDER BY FIELD(l.prioridad,'urgente','alta','media','baja'),
-                         l.score_ia_candidato DESC
+                         lsi.score_prioridad DESC,
+                         l.ultima_interaccion DESC
                 LIMIT $limite";
 
         $result = $this->db->query($sql);
         $leads  = [];
-        while ($row = $result->fetch_assoc()) {
-            $leads[] = $row;
-        }
+        while ($row = $result->fetch_assoc()) $leads[] = $row;
 
         $this->json(['leads' => $leads, 'total' => count($leads)]);
     }
 
-    // GET /api/kpis/horas?empresa_id=1&fecha=2026-06-18
+    // GET /api/kpis/horas?empresa_id=1&fecha=2026-06-18&canal=whatsapp
     public function kpiPorHora(): void
     {
         $empresa_id = (int) ($_GET['empresa_id'] ?? 0);
-        $fecha      = $this->sanitizeDate($_GET['fecha'] ?? date('Y-m-d'));
+        $fecha      = $this->safeDate($_GET['fecha'] ?? date('Y-m-d'));
+        $canal      = $this->safeEnum($_GET['canal'] ?? null, ['whatsapp','messenger','instagram','facebook','gmail','outlook','teams']);
 
-        if (!$empresa_id) {
-            $this->json(['error' => 'empresa_id requerido'], 400);
-            return;
-        }
+        if (!$empresa_id) { $this->json(['error' => 'empresa_id requerido'], 400); return; }
 
-        $sql = "SELECT hora, leads_recibidos, leads_calificados, leads_descartados,
-                       mensajes_enviados, tasa_respuesta, tiempo_respuesta_avg
-                FROM kpi_horario
-                WHERE empresa_id = $empresa_id AND fecha = '$fecha'
-                ORDER BY hora";
+        $where = "empresa_id = $empresa_id AND fecha = '$fecha'";
+        if ($canal) $where .= " AND canal = '$canal'";
 
-        $result = $this->db->query($sql);
+        $result = $this->db->query("SELECT hora, canal, mensajes_recibidos, mensajes_enviados,
+                                           leads_nuevos, leads_calificados, tiempo_respuesta_promedio, tasa_conversion
+                                    FROM kpi_horario WHERE $where ORDER BY hora, canal");
         $horas  = [];
-        while ($row = $result->fetch_assoc()) {
-            $horas[] = $row;
-        }
+        while ($row = $result->fetch_assoc()) $horas[] = $row;
 
         $this->json(['fecha' => $fecha, 'horas' => $horas]);
+    }
+
+    // GET /api/kpis/ab?empresa_id=1
+    public function abTests(): void
+    {
+        $empresa_id = (int) ($_GET['empresa_id'] ?? 0);
+        if (!$empresa_id) { $this->json(['error' => 'empresa_id requerido'], 400); return; }
+
+        $sql = "SELECT t.id, t.nombre, t.tipo, t.activo, t.fecha_inicio, t.fecha_fin,
+                       v.id AS variante_id, v.nombre AS variante, v.porcentaje_trafico,
+                       v.impresiones, v.respuestas, v.leads_generados, v.contratados,
+                       v.tasa_respuesta, v.tasa_conversion
+                FROM ab_tests t
+                JOIN ab_variantes v ON v.test_id = t.id
+                WHERE t.empresa_id = $empresa_id
+                ORDER BY t.id, v.id";
+
+        $result = $this->db->query($sql);
+        $tests  = [];
+        while ($row = $result->fetch_assoc()) {
+            $tid = $row['id'];
+            if (!isset($tests[$tid])) {
+                $tests[$tid] = [
+                    'id'          => $tid,
+                    'nombre'      => $row['nombre'],
+                    'tipo'        => $row['tipo'],
+                    'activo'      => (bool) $row['activo'],
+                    'fecha_inicio' => $row['fecha_inicio'],
+                    'fecha_fin'   => $row['fecha_fin'],
+                    'variantes'   => [],
+                ];
+            }
+            $tests[$tid]['variantes'][] = [
+                'id'                => $row['variante_id'],
+                'nombre'            => $row['variante'],
+                'porcentaje_trafico' => $row['porcentaje_trafico'],
+                'impresiones'       => $row['impresiones'],
+                'respuestas'        => $row['respuestas'],
+                'leads_generados'   => $row['leads_generados'],
+                'contratados'       => $row['contratados'],
+                'tasa_respuesta'    => $row['tasa_respuesta'],
+                'tasa_conversion'   => $row['tasa_conversion'],
+            ];
+        }
+
+        $this->json(['tests' => array_values($tests)]);
     }
 
     // -------------------------------------------------------
     // Internos
     // -------------------------------------------------------
 
-    private function totalesLeads(int $empresa_id, string $desde, string $hasta): array
+    private function totalesLeads(int $eid, string $desde, string $hasta, ?string $canal): array
     {
-        $sql = "SELECT
-                  COUNT(*) AS total,
-                  SUM(estado = 'nuevo') AS nuevos,
-                  SUM(estado = 'en_proceso') AS en_proceso,
-                  SUM(estado = 'calificado') AS calificados,
-                  SUM(estado = 'descartado') AS descartados,
-                  SUM(estado = 'contratado') AS contratados,
-                  ROUND(AVG(score_ia_candidato), 1) AS score_candidato_avg,
-                  ROUND(AVG(score_ia_contratacion), 1) AS score_contratacion_avg
-                FROM leads
-                WHERE empresa_id = $empresa_id
-                  AND DATE(creado_en) BETWEEN '$desde' AND '$hasta'";
+        $where = "empresa_id=$eid AND DATE(primera_interaccion) BETWEEN '$desde' AND '$hasta'";
+        if ($canal) $where .= " AND canal='$canal'";
 
-        return $this->db->query($sql)->fetch_assoc() ?? [];
+        return $this->db->query(
+            "SELECT COUNT(*) AS total,
+                    SUM(estado='nuevo') AS nuevos,
+                    SUM(estado='contactado') AS contactados,
+                    SUM(estado='calificado') AS calificados,
+                    SUM(estado='entrevista_agendada') AS entrevistas_agendadas,
+                    SUM(estado='contratado') AS contratados,
+                    SUM(estado IN ('rechazado','no_interesado')) AS descartados,
+                    ROUND(AVG(score_ia_candidato),1) AS score_candidato_avg,
+                    ROUND(AVG(score_ia_contratacion),1) AS score_contratacion_avg,
+                    ROUND(AVG(tiempo_respuesta_seg),0) AS tiempo_respuesta_avg
+             FROM leads WHERE $where"
+        )->fetch_assoc() ?? [];
     }
 
-    private function leadsPorHora(int $empresa_id, string $desde, string $hasta): array
+    private function leadsPorHora(int $eid, string $desde, string $hasta, ?string $canal): array
     {
-        $sql = "SELECT HOUR(creado_en) AS hora, COUNT(*) AS leads
-                FROM leads
-                WHERE empresa_id = $empresa_id
-                  AND DATE(creado_en) BETWEEN '$desde' AND '$hasta'
-                GROUP BY HOUR(creado_en)
-                ORDER BY hora";
+        $where = "empresa_id=$eid AND fecha BETWEEN '$desde' AND '$hasta'";
+        if ($canal) $where .= " AND canal='$canal'";
 
-        $result = $this->db->query($sql);
-        $rows   = [];
-        while ($row = $result->fetch_assoc()) {
-            $rows[] = $row;
-        }
+        $result = $this->db->query(
+            "SELECT hora, SUM(leads_nuevos) AS leads, SUM(mensajes_recibidos) AS mensajes
+             FROM kpi_horario WHERE $where GROUP BY hora ORDER BY hora"
+        );
+        $rows = [];
+        while ($row = $result->fetch_assoc()) $rows[] = $row;
         return $rows;
     }
 
-    private function distribucionPrioridad(int $empresa_id, string $desde, string $hasta): array
+    private function distribucionPrioridad(int $eid, string $desde, string $hasta): array
     {
-        $sql = "SELECT prioridad, COUNT(*) AS total
-                FROM leads
-                WHERE empresa_id = $empresa_id
-                  AND DATE(creado_en) BETWEEN '$desde' AND '$hasta'
-                GROUP BY prioridad";
-
-        $result = $this->db->query($sql);
-        $rows   = [];
-        while ($row = $result->fetch_assoc()) {
-            $rows[] = $row;
-        }
+        $result = $this->db->query(
+            "SELECT prioridad, COUNT(*) AS total
+             FROM leads
+             WHERE empresa_id=$eid AND DATE(primera_interaccion) BETWEEN '$desde' AND '$hasta'
+             GROUP BY prioridad ORDER BY FIELD(prioridad,'urgente','alta','media','baja')"
+        );
+        $rows = [];
+        while ($row = $result->fetch_assoc()) $rows[] = $row;
         return $rows;
     }
 
-    private function leadsPorCanal(int $empresa_id, string $desde, string $hasta): array
+    private function leadsPorCanal(int $eid, string $desde, string $hasta): array
     {
-        $sql = "SELECT COALESCE(l.fuente, 'desconocido') AS canal, COUNT(*) AS total
-                FROM leads l
-                WHERE l.empresa_id = $empresa_id
-                  AND DATE(l.creado_en) BETWEEN '$desde' AND '$hasta'
-                GROUP BY l.fuente
-                ORDER BY total DESC";
-
-        $result = $this->db->query($sql);
-        $rows   = [];
-        while ($row = $result->fetch_assoc()) {
-            $rows[] = $row;
-        }
+        $result = $this->db->query(
+            "SELECT canal, COUNT(*) AS total,
+                    ROUND(AVG(score_ia_candidato),1) AS score_avg,
+                    SUM(estado='contratado') AS contratados
+             FROM leads
+             WHERE empresa_id=$eid AND DATE(primera_interaccion) BETWEEN '$desde' AND '$hasta'
+             GROUP BY canal ORDER BY total DESC"
+        );
+        $rows = [];
+        while ($row = $result->fetch_assoc()) $rows[] = $row;
         return $rows;
     }
 
-    private function sanitizeDate(string $date): string
+    private function resumenAbTests(int $eid): array
     {
-        return preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) ? $date : date('Y-m-d');
+        $result = $this->db->query(
+            "SELECT t.id, t.nombre, t.tipo, t.activo,
+                    COUNT(v.id) AS variantes,
+                    SUM(v.impresiones) AS impresiones_total,
+                    SUM(v.leads_generados) AS leads_total
+             FROM ab_tests t LEFT JOIN ab_variantes v ON v.test_id=t.id
+             WHERE t.empresa_id=$eid AND t.activo=1
+             GROUP BY t.id ORDER BY t.created_at DESC LIMIT 5"
+        );
+        $rows = [];
+        while ($row = $result->fetch_assoc()) $rows[] = $row;
+        return $rows;
+    }
+
+    private function safeDate(string $d): string
+    {
+        return preg_match('/^\d{4}-\d{2}-\d{2}$/', $d) ? $d : date('Y-m-d');
+    }
+
+    private function safeEnum(?string $v, array $allowed): ?string
+    {
+        return ($v && in_array($v, $allowed, true)) ? $v : null;
     }
 
     private function json(mixed $data, int $status = 200): void
