@@ -215,6 +215,30 @@ class KPIsController
         return $rows;
     }
 
+    // GET /api/kpis/horas-pico?empresa_id=1&seccion_id=1
+    public function horasPico(): void
+    {
+        $empresa_id = (int) ($_GET['empresa_id'] ?? 0);
+        $seccion_id = (int) ($_GET['seccion_id'] ?? 0);
+
+        if (!$empresa_id) { $this->json(['error' => 'empresa_id requerido'], 400); return; }
+
+        $where = "empresa_id = $empresa_id AND fecha >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)";
+        if ($seccion_id) $where .= " AND seccion_id = $seccion_id";
+
+        $result = $this->db->query(
+            "SELECT hora,
+                    SUM(leads_nuevos)       AS leads,
+                    SUM(mensajes_recibidos) AS mensajes,
+                    ROUND(AVG(tasa_conversion),2) AS tasa_conversion
+             FROM kpi_horario WHERE $where GROUP BY hora ORDER BY hora"
+        );
+        $rows = [];
+        while ($row = $result->fetch_assoc()) $rows[] = $row;
+
+        $this->json($rows);
+    }
+
     private function safeDate(string $d): string
     {
         return preg_match('/^\d{4}-\d{2}-\d{2}$/', $d) ? $d : date('Y-m-d');
