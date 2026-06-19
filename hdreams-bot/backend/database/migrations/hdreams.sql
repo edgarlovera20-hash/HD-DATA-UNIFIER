@@ -89,7 +89,7 @@ CREATE TABLE leads (
   ab_variante_id       INT NULL,
   fb_leadgen_id        VARCHAR(100) NULL,
   INDEX idx_estado    (empresa_id, seccion_id, estado),
-  INDEX idx_canal     (canal, canal_user_id),
+  UNIQUE KEY idx_canal (empresa_id, canal, canal_user_id),
   INDEX idx_prioridad (prioridad),
   FOREIGN KEY (empresa_id) REFERENCES empresas(id) ON DELETE CASCADE,
   FOREIGN KEY (seccion_id) REFERENCES secciones(id) ON DELETE CASCADE

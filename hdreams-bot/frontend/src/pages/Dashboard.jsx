@@ -1,29 +1,27 @@
 import { useQuery } from '@tanstack/react-query';
-import axios from 'axios';
+import { fetchKPIs, fetchHorasPico, fetchCola } from '../lib/api';
 import { KPIGrid }    from '../components/dashboard/KPIGrid';
 import { HoursChart } from '../components/dashboard/HoursChart';
 import { LeadQueue }  from '../components/dashboard/LeadQueue';
 
-const api = axios.create({ baseURL: import.meta.env.VITE_API_URL ?? 'http://localhost:8000/api' });
-
 export default function Dashboard({ empresaId = 1, seccionId = 1 }) {
   const params = { empresa_id: empresaId, seccion_id: seccionId };
 
-  const { data: kpis, isLoading } = useQuery({
-    queryKey:       ['kpis', empresaId, seccionId],
-    queryFn:        () => api.get('/kpis', { params }).then((r) => r.data),
+  const { data: kpis, isLoading, isError } = useQuery({
+    queryKey:        ['kpis', empresaId, seccionId],
+    queryFn:         () => fetchKPIs(params),
     refetchInterval: 60_000,
   });
 
   const { data: horasPico } = useQuery({
-    queryKey: ['horas-pico', empresaId, seccionId],
-    queryFn:  () => api.get('/kpis/horas-pico', { params }).then((r) => r.data),
+    queryKey:        ['horas-pico', empresaId, seccionId],
+    queryFn:         () => fetchHorasPico(params),
     refetchInterval: 300_000,
   });
 
   const { data: cola } = useQuery({
-    queryKey:       ['cola', empresaId],
-    queryFn:        () => api.get('/kpis/cola', { params: { empresa_id: empresaId, limite: 20 } }).then((r) => r.data?.leads ?? r.data),
+    queryKey:        ['cola', empresaId],
+    queryFn:         () => fetchCola({ empresa_id: empresaId, limite: 20 }).then((d) => d?.leads ?? d),
     refetchInterval: 30_000,
   });
 
@@ -31,6 +29,14 @@ export default function Dashboard({ empresaId = 1, seccionId = 1 }) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <p className="text-red-400 text-sm">Error al cargar los datos. Verifica la conexión con el backend.</p>
       </div>
     );
   }

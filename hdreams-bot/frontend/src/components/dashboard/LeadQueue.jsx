@@ -39,7 +39,7 @@ export const LeadQueue = ({ leads = [] }) => {
             >
               {/* Avatar */}
               <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0 font-bold text-xs text-primary">
-                {(lead.nombre ?? '?')[0].toUpperCase()}
+                {(lead.nombre || '?')[0].toUpperCase()}
               </div>
 
               {/* Info */}

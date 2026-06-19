@@ -10,7 +10,7 @@ $mysqli = new mysqli($_ENV['DB_HOST'], $_ENV['DB_USER'], $_ENV['DB_PASS'], $_ENV
 $mysqli->set_charset('utf8mb4');
 
 // -------------------------------------------------------
-// Verificación de webhook Meta
+// GET: verificación de webhook Meta
 // -------------------------------------------------------
 if (isset($_GET['hub_mode']) && $_GET['hub_mode'] === 'subscribe') {
     if ($_GET['hub_verify_token'] === $_ENV['META_VERIFY_TOKEN']) {
@@ -22,9 +22,21 @@ if (isset($_GET['hub_mode']) && $_GET['hub_mode'] === 'subscribe') {
 }
 
 // -------------------------------------------------------
+// POST: verificar firma X-Hub-Signature-256
+// -------------------------------------------------------
+$rawBody = file_get_contents('php://input');
+$sigHeader = $_SERVER['HTTP_X_HUB_SIGNATURE_256'] ?? '';
+$expected  = 'sha256=' . hash_hmac('sha256', $rawBody, $_ENV['META_APP_SECRET']);
+
+if (!$sigHeader || !hash_equals($expected, $sigHeader)) {
+    http_response_code(403);
+    exit;
+}
+
+// -------------------------------------------------------
 // Payload entrante
 // -------------------------------------------------------
-$input = json_decode(file_get_contents('php://input'), true);
+$input = json_decode($rawBody, true);
 if (!isset($input['entry'][0]['changes'][0]['value']['messages'][0])) {
     http_response_code(200);
     exit;
@@ -45,8 +57,15 @@ $nombre = $value['contacts'][0]['profile']['name'] ?? 'Desconocido';
 // -------------------------------------------------------
 // Resolver empresa/sección por número de teléfono destino
 // -------------------------------------------------------
-$empresa_id = 1;
-$seccion_id = 1;
+$display_phone = $value['metadata']['display_phone_number'] ?? '';
+$phone_esc     = $mysqli->real_escape_string($display_phone);
+$canal_row     = $mysqli->query(
+    "SELECT * FROM canales WHERE canal='whatsapp' AND activo=1
+     AND JSON_UNQUOTE(JSON_EXTRACT(config,'$.phone_number')) = '$phone_esc' LIMIT 1"
+)->fetch_assoc();
+
+$empresa_id = (int) ($canal_row['empresa_id'] ?? 1);
+$seccion_id = (int) ($canal_row['seccion_id'] ?? 1);
 
 // -------------------------------------------------------
 // Upsert lead
@@ -61,7 +80,7 @@ $mysqli->query(
 );
 
 $lead_id = $mysqli->insert_id
-    ?: (int) $mysqli->query("SELECT id FROM leads WHERE canal_user_id='$wa_esc' AND canal='whatsapp'")->fetch_assoc()['id'];
+    ?: (int) $mysqli->query("SELECT id FROM leads WHERE empresa_id=$empresa_id AND canal='whatsapp' AND canal_user_id='$wa_esc'")->fetch_assoc()['id'];
 
 // -------------------------------------------------------
 // Extracción de datos del mensaje
@@ -81,8 +100,8 @@ if (preg_match('/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/', $texto, $m)
 // -------------------------------------------------------
 // Scoring IA
 // -------------------------------------------------------
-$scorer    = new LeadScorerIA($empresa_id, $seccion_id, $mysqli);
-$score     = $scorer->calcularScore($lead_id);
+$scorer = new LeadScorerIA($empresa_id, $seccion_id, $mysqli);
+$score  = $scorer->calcularScore($lead_id);
 
 // -------------------------------------------------------
 // KPI horario
@@ -99,7 +118,6 @@ $mysqli->query(
 // Respuesta IA (placeholder — reemplazar con GPT chain)
 // -------------------------------------------------------
 $lead_row = $mysqli->query("SELECT * FROM leads WHERE id=$lead_id")->fetch_assoc();
-$seccion  = $mysqli->query("SELECT * FROM secciones WHERE id=$seccion_id")->fetch_assoc();
 
 $respuesta = empty($lead_row['edad'])
     ? "Hola $nombre, soy Lic. Gissell de RH en Heavenly Dreams. ¿Qué edad tienes?"
@@ -108,8 +126,8 @@ $respuesta = empty($lead_row['edad'])
 // -------------------------------------------------------
 // Enviar respuesta + notificación urgente al reclutador
 // -------------------------------------------------------
-$canal_cfg = $mysqli->query(
-    "SELECT * FROM canales WHERE empresa_id=$empresa_id AND seccion_id=$seccion_id AND canal='whatsapp'"
+$canal_cfg = $canal_row ?? $mysqli->query(
+    "SELECT * FROM canales WHERE empresa_id=$empresa_id AND seccion_id=$seccion_id AND canal='whatsapp' LIMIT 1"
 )->fetch_assoc();
 
 $manager = new CanalManager($empresa_id, $seccion_id, $mysqli, $canal_cfg);
@@ -119,8 +137,8 @@ $manager->enviarRespuesta($wa_id, $respuesta);
 if ($score && $score['score_prioridad'] >= 80) {
     $reclutador = $_ENV['RECRUITER_PHONE'] ?? '';
     if ($reclutador) {
-        $sp   = $score['score_prioridad'];
-        $raz  = $score['razonamiento'];
+        $sp  = $score['score_prioridad'];
+        $raz = $score['razonamiento'];
         $manager->enviarRespuesta(
             $reclutador,
             "🚨 LEAD URGENTE\nNombre: $nombre\nScore: $sp/100\n$raz\nVer: /leads/$lead_id"

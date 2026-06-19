@@ -5,6 +5,14 @@ require __DIR__ . '/../vendor/autoload.php';
 $dotenv = Dotenv\Dotenv::createImmutable(__DIR__ . '/..');
 $dotenv->load();
 
+// Evitar ejecuciones concurrentes
+$lockFile = sys_get_temp_dir() . '/hdreams-publish-posts.lock';
+$lock = fopen($lockFile, 'c');
+if (!flock($lock, LOCK_EX | LOCK_NB)) {
+    echo "[" . date('Y-m-d H:i:s') . "] Ya hay una instancia corriendo, saliendo.\n";
+    exit(0);
+}
+
 $mysqli = new mysqli($_ENV['DB_HOST'], $_ENV['DB_USER'], $_ENV['DB_PASS'], $_ENV['DB_NAME']);
 $mysqli->set_charset('utf8mb4');
 
@@ -23,7 +31,7 @@ $count = 0;
 
 while ($p = $posts->fetch_assoc()) {
     $token    = $p['fb_page_token'];
-    $page_id  = $p['page_id'];
+    $page_id  = $p['fb_page_id'];
     $post_id  = $p['id'];
 
     if (!$token || !$page_id) {

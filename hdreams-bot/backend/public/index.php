@@ -7,10 +7,21 @@ $dotenv = Dotenv\Dotenv::createImmutable(__DIR__ . '/..');
 $dotenv->load();
 
 // CORS
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+$allowedOrigin = $_ENV['FRONTEND_URL'] ?? '*';
+header("Access-Control-Allow-Origin: $allowedOrigin");
+header('Access-Control-Allow-Methods: GET, POST, PATCH, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, Authorization');
+header('Vary: Origin');
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(204); exit; }
+
+// Bearer token auth
+$authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
+if (!$authHeader || !hash_equals('Bearer ' . ($_ENV['API_SECRET'] ?? ''), $authHeader)) {
+    http_response_code(401);
+    header('Content-Type: application/json');
+    echo json_encode(['error' => 'Unauthorized']);
+    exit;
+}
 
 $mysqli = new mysqli($_ENV['DB_HOST'], $_ENV['DB_USER'], $_ENV['DB_PASS'], $_ENV['DB_NAME']);
 $mysqli->set_charset('utf8mb4');

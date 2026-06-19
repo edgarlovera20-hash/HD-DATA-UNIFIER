@@ -2,37 +2,41 @@ import { Users, MessageSquare, CheckCircle, Clock, TrendingUp, AlertTriangle } f
 import { Metric } from '../ui/Metric';
 
 export const KPIGrid = ({ data }) => {
-  const d = data ?? {};
+  const totales   = data?.totales ?? {};
+  const mensajes  = (data?.por_hora ?? []).reduce((sum, h) => sum + Number(h.mensajes || 0), 0);
+  const conversion = totales.total > 0
+    ? ((Number(totales.contratados) || 0) / Number(totales.total) * 100)
+    : 0;
 
   const metrics = [
     {
       label:      'Mensajes recibidos',
-      value:      d.mensajes    ?? 0,
+      value:      mensajes,
       icon:       MessageSquare,
       delay:      0,
     },
     {
       label:      'Leads nuevos',
-      value:      d.leads       ?? 0,
+      value:      Number(totales.nuevos ?? 0),
       icon:       Users,
       delay:      0.06,
     },
     {
       label:      'Leads calificados',
-      value:      d.calificados ?? 0,
+      value:      Number(totales.calificados ?? 0),
       icon:       CheckCircle,
       delay:      0.12,
     },
     {
       label:      'T. respuesta',
-      value:      Math.round(d.tiempo ?? 0),
+      value:      Math.round(totales.tiempo_respuesta_avg ?? 0),
       suffix:     's',
       icon:       Clock,
       delay:      0.18,
     },
     {
       label:      'Conversión',
-      value:      parseFloat(d.conversion ?? 0),
+      value:      parseFloat(conversion.toFixed(1)),
       suffix:     '%',
       decimals:   1,
       icon:       TrendingUp,
@@ -40,7 +44,7 @@ export const KPIGrid = ({ data }) => {
     },
     {
       label:      'Score IA promedio',
-      value:      parseFloat(d.score_avg ?? 0),
+      value:      parseFloat(totales.score_candidato_avg ?? 0),
       suffix:     '/100',
       decimals:   1,
       icon:       AlertTriangle,

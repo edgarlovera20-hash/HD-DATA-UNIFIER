@@ -19,7 +19,19 @@ if (isset($_GET['hub_mode']) && $_GET['hub_mode'] === 'subscribe') {
     exit;
 }
 
-$input = json_decode(file_get_contents('php://input'), true);
+// -------------------------------------------------------
+// Verificar firma X-Hub-Signature-256
+// -------------------------------------------------------
+$rawBody   = file_get_contents('php://input');
+$sigHeader = $_SERVER['HTTP_X_HUB_SIGNATURE_256'] ?? '';
+$expected  = 'sha256=' . hash_hmac('sha256', $rawBody, $_ENV['META_APP_SECRET']);
+
+if (!$sigHeader || !hash_equals($expected, $sigHeader)) {
+    http_response_code(403);
+    exit;
+}
+
+$input = json_decode($rawBody, true);
 
 if (!isset($input['entry'][0]['changes'][0]['value'])) {
     http_response_code(200);
