@@ -2,6 +2,7 @@
 require __DIR__ . '/../vendor/autoload.php';
 use App\Controllers\KPIsController;
 use App\Controllers\LeadController;
+use App\Middleware\AuthMiddleware;
 
 $dotenv = Dotenv\Dotenv::createImmutable(__DIR__ . '/..');
 $dotenv->load();
@@ -14,14 +15,7 @@ header('Access-Control-Allow-Headers: Content-Type, Authorization');
 header('Vary: Origin');
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(204); exit; }
 
-// Bearer token auth
-$authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
-if (!$authHeader || !hash_equals('Bearer ' . ($_ENV['API_SECRET'] ?? ''), $authHeader)) {
-    http_response_code(401);
-    header('Content-Type: application/json');
-    echo json_encode(['error' => 'Unauthorized']);
-    exit;
-}
+AuthMiddleware::verify();
 
 $mysqli = new mysqli($_ENV['DB_HOST'], $_ENV['DB_USER'], $_ENV['DB_PASS'], $_ENV['DB_NAME']);
 $mysqli->set_charset('utf8mb4');

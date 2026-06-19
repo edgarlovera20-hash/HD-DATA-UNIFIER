@@ -11,11 +11,7 @@
   "autoload": {
     "psr-4": {
       "App\\": "app/"
-    },
-    "files": [
-      "app/Services/LeadScorerIA.php",
-      "app/Services/CanalManager.php"
-    ]
+    }
   },
   "config": {
     "optimize-autoloader": true,

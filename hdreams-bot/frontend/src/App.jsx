@@ -2,6 +2,8 @@ import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { LayoutDashboard, Users, BarChart2 } from 'lucide-react';
 import Dashboard from './pages/Dashboard';
+import Leads     from './pages/Leads';
+import Stats     from './pages/Stats';
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
@@ -63,8 +65,8 @@ export default function App() {
         <Layout>
           <Routes>
             <Route path="/"      element={<Dashboard />} />
-            <Route path="/leads" element={<div className="text-textMuted p-8 text-center">Módulo de leads (próximamente)</div>} />
-            <Route path="/stats" element={<div className="text-textMuted p-8 text-center">Estadísticas avanzadas (próximamente)</div>} />
+            <Route path="/leads" element={<Leads />} />
+            <Route path="/stats" element={<Stats />} />
           </Routes>
         </Layout>
       </BrowserRouter>
