@@ -1,18 +1,20 @@
 <?php
 
+namespace App\Services;
+
 class LeadScorerIA
 {
-    private int    $empresa_id;
-    private int    $seccion_id;
+    private int     $empresa_id;
+    private int     $seccion_id;
     private \mysqli $mysqli;
-    private string $openai_key;
+    private string  $openai_key;
 
     public function __construct(int $empresa_id, int $seccion_id, \mysqli $mysqli)
     {
         $this->empresa_id = $empresa_id;
         $this->seccion_id = $seccion_id;
         $this->mysqli     = $mysqli;
-        $this->openai_key = getenv('OPENAI_API_KEY') ?: '';
+        $this->openai_key = $_ENV['OPENAI_API_KEY'] ?? '';
     }
 
     public function calcularScore(int $lead_id): ?array
@@ -39,7 +41,6 @@ class LeadScorerIA
         $eid = $this->empresa_id;
         $sid = $this->seccion_id;
 
-        // fallback si la tabla aún no existe
         $r = @$this->mysqli
             ->query("SELECT AVG(CASE WHEN fue_contratado=1 THEN edad END) AS edad_prom, COUNT(*) AS total
                      FROM lead_historico_ml
@@ -51,11 +52,11 @@ class LeadScorerIA
 
     private function construirPrompt(array $lead, array $hist): string
     {
-        $edad   = $lead['edad'] ?? 0;
-        $canal  = $lead['canal'];
-        $tiempo = $lead['tiempo_respuesta_seg'];
-        $msgs   = $lead['mensajes_recibidos'];
-        $meta   = json_decode($lead['metadata'] ?? '{}', true);
+        $edad     = $lead['edad'] ?? 0;
+        $canal    = $lead['canal'];
+        $tiempo   = $lead['tiempo_respuesta_seg'];
+        $msgs     = $lead['mensajes_recibidos'];
+        $meta     = json_decode($lead['metadata'] ?? '{}', true);
         $edadProm = round($hist['edad_prom'] ?? 26);
 
         return <<<PROMPT
@@ -87,11 +88,23 @@ PROMPT;
 
     private function llamarGPT4(string $prompt): array
     {
+        $fallback = [
+            'score_candidato'    => 0,
+            'score_contratacion' => 0,
+            'score_prioridad'    => 0,
+            'factores_positivos' => [],
+            'factores_negativos' => ['api_no_disponible'],
+            'razonamiento'       => 'Scoring pendiente — API no disponible.',
+        ];
+
+        if (!$this->openai_key) return $fallback;
+
         $ch = curl_init('https://api.openai.com/v1/chat/completions');
         curl_setopt_array($ch, [
-            CURLOPT_POST          => true,
+            CURLOPT_POST           => true,
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_HTTPHEADER    => [
+            CURLOPT_TIMEOUT        => 20,
+            CURLOPT_HTTPHEADER     => [
                 'Authorization: Bearer ' . $this->openai_key,
                 'Content-Type: application/json',
             ],
@@ -103,11 +116,25 @@ PROMPT;
             ]),
         ]);
 
-        $raw = curl_exec($ch);
+        $raw    = curl_exec($ch);
+        $curlErr = curl_error($ch);
+        $status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
 
+        if ($curlErr || !$raw) {
+            error_log("[LeadScorerIA] curl error: $curlErr");
+            return $fallback;
+        }
+
         $response = json_decode($raw, true);
-        $r        = json_decode($response['choices'][0]['message']['content'] ?? '{}', true);
+
+        if ($status !== 200 || !isset($response['choices'][0]['message']['content'])) {
+            $apiErr = $response['error']['message'] ?? "HTTP $status";
+            error_log("[LeadScorerIA] OpenAI error: $apiErr");
+            return $fallback;
+        }
+
+        $r = json_decode($response['choices'][0]['message']['content'], true) ?? [];
 
         return [
             'score_candidato'    => (float) ($r['score_candidato']    ?? 0),
@@ -133,12 +160,14 @@ PROMPT;
                (lead_id,score_candidato,score_contratacion,score_prioridad,factores_positivos,factores_negativos,razonamiento)
              VALUES ($lead_id,$sc,$sco,$sp,'$fp','$fn','$raz')
              ON DUPLICATE KEY UPDATE
-               score_candidato=$sc,score_contratacion=$sco,score_prioridad=$sp,calculado_en=NOW()"
+               score_candidato=$sc,score_contratacion=$sco,score_prioridad=$sp,
+               factores_positivos='$fp',factores_negativos='$fn',razonamiento='$raz',calculado_en=NOW()"
         );
 
         $prioridad = $this->calcularPrioridad($sp);
         $this->mysqli->query(
-            "UPDATE leads SET score_ia_candidato=$sc,score_ia_contratacion=$sco,prioridad='$prioridad',ultimo_scoring=NOW() WHERE id=$lead_id"
+            "UPDATE leads SET score_ia_candidato=$sc,score_ia_contratacion=$sco,
+             prioridad='$prioridad',ultimo_scoring=NOW() WHERE id=$lead_id"
         );
     }
 
@@ -151,7 +180,8 @@ PROMPT;
         $this->mysqli->query(
             "INSERT INTO lead_cola_prioridad (lead_id,prioridad,score_prioridad,sla_horas,vence_en)
              VALUES ($lead_id,'$prioridad',$sp,$sla,DATE_ADD(NOW(),INTERVAL $sla HOUR))
-             ON DUPLICATE KEY UPDATE prioridad='$prioridad',score_prioridad=$sp,vence_en=DATE_ADD(NOW(),INTERVAL $sla HOUR)"
+             ON DUPLICATE KEY UPDATE prioridad='$prioridad',score_prioridad=$sp,
+             sla_horas=$sla,vence_en=DATE_ADD(NOW(),INTERVAL $sla HOUR)"
         );
     }
 

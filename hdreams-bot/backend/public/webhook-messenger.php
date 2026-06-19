@@ -1,7 +1,7 @@
 <?php
 require __DIR__ . '/../vendor/autoload.php';
-require __DIR__ . '/../app/Services/LeadScorerIA.php';
-require __DIR__ . '/../app/Services/CanalManager.php';
+use App\Services\LeadScorerIA;
+use App\Services\CanalManager;
 
 $dotenv = Dotenv\Dotenv::createImmutable(__DIR__ . '/..');
 $dotenv->load();
